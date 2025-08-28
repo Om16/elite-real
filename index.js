@@ -7,8 +7,20 @@ const cors = require('cors');
 
 // 2. Create an instance of an Express application
 const app = express();
+
+
+// Configure CORS with specific options
+const corsOptions = {
+  origin: 'https://elite-real.vercel.app', // Your Vercel frontend URL
+  credentials: true, // Allow credentials if needed
+  optionsSuccessStatus: 200 // Some legacy browsers choke on 204
+};
+
 // Add this after creating your Express app (after const app = express();)
-app.use(cors()); // This enables CORS for all routes
+//app.use(cors()); // This enables CORS for all routes
+
+// Use CORS middleware with the specific options
+app.use(cors(corsOptions));
 
 
 // ... after const app = express();

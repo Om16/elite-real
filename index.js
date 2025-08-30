@@ -8,7 +8,6 @@ const cors = require('cors');
 // 2. Create an instance of an Express application
 const app = express();
 
-
 // Configure CORS with specific options
 const corsOptions = {
   origin: 'https://elite-real.vercel.app', // Your Vercel frontend URL
@@ -16,12 +15,11 @@ const corsOptions = {
   optionsSuccessStatus: 200 // Some legacy browsers choke on 204
 };
 
-// Add this after creating your Express app (after const app = express();)
-//app.use(cors()); // This enables CORS for all routes
-
 // Use CORS middleware with the specific options
 app.use(cors(corsOptions));
 
+// Handle preflight requests for all routes
+app.options('*', cors(corsOptions));
 
 // ... after const app = express();
 app.use(express.json()); // This middleware allows our server to understand JSON data sent in requests
@@ -31,11 +29,6 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-
-// ./index.js
-
-// ... your existing imports and app setup ...
-
 // Initialize the Supabase Admin Client for server-side operations
 // This client uses the powerful service_role key which must be kept secret and never exposed to the browser.
 const supabaseAdmin = createClient(
@@ -43,14 +36,32 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY // This is the new env variable you added on Render
 );
 
-
-
-
-
 // 4. Define the port number our server will listen on
 const PORT = process.env.PORT || 3000;
 
-// 5. Define a route to get the list of properties from Supabase
+// Authentication middleware
+const authenticateToken = async (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (token == null) {
+    return res.sendStatus(401);
+  }
+
+  try {
+    // Verify the token using Supabase
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error) {
+      return res.sendStatus(403);
+    }
+    req.user = data.user; // Add user info to the request object
+    next();
+  } catch (error) {
+    return res.sendStatus(403);
+  }
+};
+
+// 5. Define a route to get the list of properties from Supabase (Public)
 app.get('/api/properties', async (req, res) => {
   try {
     // Fetch data from the 'properties' table in Supabase
@@ -69,12 +80,6 @@ app.get('/api/properties', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
-
-
-// ./index.js
-
-// ... your existing code ...
 
 // POST /api/auth/login - Secure server-side login
 app.post('/api/auth/login', async (req, res) => {
@@ -105,11 +110,6 @@ app.post('/api/auth/login', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
-
-
-
-// ./index.js
 
 // POST /api/auth/signup - Secure server-side user registration
 app.post('/api/auth/signup', async (req, res) => {
@@ -155,8 +155,7 @@ app.post('/api/auth/signup', async (req, res) => {
   }
 });
 
-
-// 6. Define a route to handle booking submissions
+// Define a route to handle booking submissions (Public)
 app.post('/api/bookings', async (req, res) => {
   try {
     // Extract data from the request body (sent by the frontend form)
@@ -195,7 +194,250 @@ app.post('/api/bookings', async (req, res) => {
   }
 });
 
-// 6. Start the server
+// Dashboard API Endpoints (Protected)
+
+// GET /api/profile - Fetch user profile
+app.get('/api/profile', authenticateToken, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('realtors')
+      .select('*')
+      .eq('id', req.user.id)
+      .single();
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PUT /api/profile - Update user profile
+app.put('/api/profile', authenticateToken, async (req, res) => {
+  const { name, company_name, email } = req.body;
+
+  try {
+    const { data, error } = await supabase
+      .from('realtors')
+      .update({ name, company_name, email })
+      .eq('id', req.user.id)
+      .select();
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json(data[0]);
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/realtor/properties - Fetch user's properties
+app.get('/api/realtor/properties', authenticateToken, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('properties')
+      .select('*')
+      .eq('realtor_id', req.user.id);
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/realtor/properties - Create a new property
+app.post('/api/realtor/properties', authenticateToken, async (req, res) => {
+  const { title, location, price, bedrooms, bathrooms, imageUrl, description } = req.body;
+
+  try {
+    const { data, error } = await supabase
+      .from('properties')
+      .insert([
+        {
+          title,
+          location,
+          price,
+          bedrooms,
+          bathrooms,
+          imageUrl,
+          description,
+          realtor_id: req.user.id
+        }
+      ])
+      .select();
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.status(201).json(data[0]);
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PUT /api/realtor/properties/:id - Update a property
+app.put('/api/realtor/properties/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { title, location, price, bedrooms, bathrooms, imageUrl, description } = req.body;
+
+  try {
+    // Verify the property belongs to the user
+    const { data: property, error: fetchError } = await supabase
+      .from('properties')
+      .select('realtor_id')
+      .eq('id', id)
+      .single();
+
+    if (fetchError) {
+      return res.status(404).json({ error: 'Property not found' });
+    }
+
+    if (property.realtor_id !== req.user.id) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    const { data, error } = await supabase
+      .from('properties')
+      .update({ title, location, price, bedrooms, bathrooms, imageUrl, description })
+      .eq('id', id)
+      .select();
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json(data[0]);
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /api/realtor/properties/:id - Delete a property
+app.delete('/api/realtor/properties/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Verify the property belongs to the user
+    const { data: property, error: fetchError } = await supabase
+      .from('properties')
+      .select('realtor_id')
+      .eq('id', id)
+      .single();
+
+    if (fetchError) {
+      return res.status(404).json({ error: 'Property not found' });
+    }
+
+    if (property.realtor_id !== req.user.id) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    const { error } = await supabase
+      .from('properties')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.status(204).send();
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/realtor/bookings - Fetch user's bookings
+app.get('/api/realtor/bookings', authenticateToken, async (req, res) => {
+  try {
+    // Get all property IDs for the realtor
+    const { data: properties, error: propertiesError } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('realtor_id', req.user.id);
+
+    if (propertiesError) {
+      return res.status(500).json({ error: propertiesError.message });
+    }
+
+    const propertyIds = properties.map(p => p.id);
+
+    // Get bookings for these properties
+    const { data: bookings, error: bookingsError } = await supabase
+      .from('bookings')
+      .select('*')
+      .in('property_id', propertyIds);
+
+    if (bookingsError) {
+      return res.status(500).json({ error: bookingsError.message });
+    }
+
+    res.json(bookings);
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PUT /api/realtor/bookings/:id - Update booking status
+app.put('/api/realtor/bookings/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  try {
+    // Get the booking to find the property ID
+    const { data: booking, error: bookingError } = await supabase
+      .from('bookings')
+      .select('property_id')
+      .eq('id', id)
+      .single();
+
+    if (bookingError) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    // Verify the property belongs to the user
+    const { data: property, error: propertyError } = await supabase
+      .from('properties')
+      .select('realtor_id')
+      .eq('id', booking.property_id)
+      .single();
+
+    if (propertyError) {
+      return res.status(404).json({ error: 'Property not found' });
+    }
+
+    if (property.realtor_id !== req.user.id) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    // Update the booking status
+    const { data, error } = await supabase
+      .from('bookings')
+      .update({ status })
+      .eq('id', id)
+      .select();
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json(data[0]);
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Start the server
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });

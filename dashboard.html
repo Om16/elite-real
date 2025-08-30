@@ -486,7 +486,7 @@
                 }
                 
                 // Fetch bookings
-                const bookingsResponse = await fetch('https://elite-real-api.onrender.com/api/bookings', {
+                const bookingsResponse = await fetch('https://elite-real-api.onrender.com/api/realtor/bookings', {
                     headers: {
                         'Authorization': `Bearer ${token}`
                     }
@@ -620,7 +620,7 @@
             };
             
             try {
-                const response = await fetch('https://elite-real-api.onrender.com/api/properties', {
+                const response = await fetch('https://elite-real-api.onrender.com/api/realtor/properties', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
